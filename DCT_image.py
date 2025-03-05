@@ -2,77 +2,98 @@ import cv2
 import numpy as np
 from scipy.fftpack import dct, idct
 
-# compressione immagine
 
-    
+
+
 class DCT_image:
     def __init__(self, key=None):
         self.key = key
         self.block_size = 8
+        self.alpha = 0.01 # default è 0.05
 
     def _generate_blocks(self, image):
         blocks = []
-        for j in range(0, image.shape[0], self.block_size):
-            for i in range(0, image.shape[1], self.block_size):
+        rows, cols = image.shape
+        for j in range(0, rows, self.block_size):
+            for i in range(0, cols, self.block_size):
                 blocks.append(image[j:j+self.block_size, i:i+self.block_size])
         return blocks
 
     def _reconstruct_from_blocks(self, blocks, image_shape):
-        # Specifica il dtype come np.float32 per coerenza durante l'elaborazione
         reconstructed = np.zeros(image_shape, dtype=np.float32)
         block_idx = 0
-        for j in range(0, image_shape[0], self.block_size):
-            for i in range(0, image_shape[1], self.block_size):
+        rows, cols = image_shape
+        for j in range(0, rows, self.block_size):
+            for i in range(0, cols, self.block_size):
                 reconstructed[j:j+self.block_size, i:i+self.block_size] = blocks[block_idx]
                 block_idx += 1
         return reconstructed
 
     def _encode_channel(self, host_channel, target_channel):
+        # Assicurarsi che i canali siano in float32
+        host_channel = np.float32(host_channel)
+        target_channel = np.float32(target_channel)
         host_blocks = self._generate_blocks(host_channel)
         target_blocks = self._generate_blocks(target_channel)
-        # Assicuriamoci che il numero di blocchi target non superi quello host
         target_blocks = target_blocks[:len(host_blocks)]
         encoded_blocks = []
-        for host_block, target_block in zip(host_blocks, target_blocks):
-            dct_host = dct(dct(host_block.T, norm='ortho').T, norm='ortho')
-            dct_target = dct(dct(target_block.T, norm='ortho').T, norm='ortho')
-            dct_encoded = dct_host + (dct_target * 0.05)
-            encoded_block = idct(idct(dct_encoded.T, norm='ortho').T, norm='ortho')
+        for h_block, t_block in zip(host_blocks, target_blocks):
+            # Applica la DCT ai blocchi host e target
+            dct_host = cv2.dct(h_block)
+            dct_target = cv2.dct(t_block)
+            # Embedding: aggiungi un piccolo contributo del blocco target al blocco host
+            dct_encoded = dct_host + self.alpha * dct_target
+            # Applica l'inverse DCT per ottenere il blocco modificato
+            encoded_block = cv2.idct(dct_encoded)
             encoded_blocks.append(encoded_block)
         return self._reconstruct_from_blocks(encoded_blocks, host_channel.shape)
 
     def _decode_channel(self, encoded_channel, host_channel):
+        # Converti i canali in float32
+        encoded_channel = np.float32(encoded_channel)
+        host_channel = np.float32(host_channel)
         encoded_blocks = self._generate_blocks(encoded_channel)
         host_blocks = self._generate_blocks(host_channel)
         encoded_blocks = encoded_blocks[:len(host_blocks)]
         decoded_blocks = []
-        for encoded_block, host_block in zip(encoded_blocks, host_blocks):
-            dct_encoded = dct(dct(encoded_block.T, norm='ortho').T, norm='ortho')
-            dct_host = dct(dct(host_block.T, norm='ortho').T, norm='ortho')
-            dct_decoded = (dct_encoded - dct_host) / 0.05
-            decoded_block = idct(idct(dct_decoded.T, norm='ortho').T, norm='ortho')
+        for e_block, h_block in zip(encoded_blocks, host_blocks):
+            # Applica la DCT ai blocchi
+            dct_encoded = cv2.dct(e_block)
+            dct_host = cv2.dct(h_block)
+            # Estrai il contributo del target calcolando la differenza pesata
+            dct_decoded = (dct_encoded - dct_host) / self.alpha
+            # Applica l'inverse DCT per ottenere il blocco decodificato
+            decoded_block = cv2.idct(dct_decoded)
             decoded_blocks.append(decoded_block)
         return self._reconstruct_from_blocks(decoded_blocks, host_channel.shape)
 
     def encode_image_with_image(self, host_img, target_img):
-        # Ridimensiona target per avere le stesse dimensioni di host
+        """
+        Incorpora l'immagine target nell'immagine host utilizzando i coefficienti DCT.
+        Si ridimensiona target_img per avere le stesse dimensioni di host_img.
+        """
+        # Ridimensiona la target per adattarsi a host
         target_img = cv2.resize(target_img, (host_img.shape[1], host_img.shape[0]))
-        encoded_r = self._encode_channel(host_img[:,:,0], target_img[:,:,0])
-        encoded_g = self._encode_channel(host_img[:,:,1], target_img[:,:,1])
-        encoded_b = self._encode_channel(host_img[:,:,2], target_img[:,:,2])
-        # Convertiamo in uint8 prima di salvare o visualizzare
-        encoded = cv2.merge([encoded_r, encoded_g, encoded_b])
-        return np.uint8(np.clip(encoded, 0, 255))
+        # Poiché le immagini lette con cv2 sono in BGR, processiamo ciascun canale mantenendo l'ordine
+        encoded_b = self._encode_channel(host_img[:, :, 0], target_img[:, :, 0])
+        encoded_g = self._encode_channel(host_img[:, :, 1], target_img[:, :, 1])
+        encoded_r = self._encode_channel(host_img[:, :, 2], target_img[:, :, 2])
+        # Ricompone l'immagine encoded in ordine BGR
+        encoded_img = cv2.merge([encoded_b, encoded_g, encoded_r])
+        # Assicura che i valori siano nel range corretto
+        return np.uint8(np.clip(encoded_img, 0, 255))
 
     def decode_image_with_image(self, encoded_img, host_img):
-        decoded_r = self._decode_channel(encoded_img[:,:,0], host_img[:,:,0])
-        decoded_g = self._decode_channel(encoded_img[:,:,1], host_img[:,:,1])
-        decoded_b = self._decode_channel(encoded_img[:,:,2], host_img[:,:,2])
-        decoded = cv2.merge([decoded_r, decoded_g, decoded_b])
-        return np.uint8(np.clip(decoded, 0, 255))
+        """
+        Estrae l'immagine target nascosta dall'immagine encoded, utilizzando l'immagine host originale come riferimento.
+        """
+        decoded_b = self._decode_channel(encoded_img[:, :, 0], host_img[:, :, 0])
+        decoded_g = self._decode_channel(encoded_img[:, :, 1], host_img[:, :, 1])
+        decoded_r = self._decode_channel(encoded_img[:, :, 2], host_img[:, :, 2])
+        decoded_img = cv2.merge([decoded_b, decoded_g, decoded_r])
+        return np.uint8(np.clip(decoded_img, 0, 255))
 
-# Funzioni per gestire il marker di sincronizzazione
-# Funzioni per gestire il marker di sincronizzazione
+
 def create_sync_marker(block_size=8, value=255):
     """Crea un marker di dimensione block_size x block_size con valore costante per tutti i canali."""
     marker = np.full((block_size, block_size, 3), value, dtype=np.uint8)

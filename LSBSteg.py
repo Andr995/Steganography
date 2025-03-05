@@ -119,32 +119,75 @@ class LSBSteg():
         return unhideTxt
 
     def encode_image(self, imtohide):
-        w = imtohide.width
-        h = imtohide.height
-        if self.width*self.height*self.nbchannels < w*h*imtohide.channels:
-            raise SteganographyException("Carrier image not big enough to hold all the datas to steganography")
-        binw = self.binary_value(w, 16)
-        binh = self.binary_value(h, 16)
-        self.put_binary_value(binw) 
-        self.put_binary_value(binh) 
-        for h in range(imtohide.height): 
-            for w in range(imtohide.width):
-                for chan in range(imtohide.channels):
-                    val = imtohide[h,w][chan]
-                    self.put_binary_value(self.byteValue(int(val)))
+        """
+        Hide an image in the current image
+        imtohide: ImageWrapper or numpy array containing the image to hide
+        """
+        # Get dimensions from the image to hide
+        if isinstance(imtohide, np.ndarray):
+            hidden_height, hidden_width = imtohide.shape[:2]
+            hidden_channels = imtohide.shape[2] if len(imtohide.shape) > 2 else 1
+        else:  # Assuming ImageWrapper instance
+            hidden_height, hidden_width = imtohide.height, imtohide.width
+            hidden_channels = imtohide.channels
+
+        # Check if carrier image is big enough
+        total_bits_required = (hidden_width * hidden_height * hidden_channels * 8) + 16 + 16 + 8
+        available_bits = self.width * self.height * self.nbchannels * 8  # 8 bits per byte
+        
+        if available_bits < total_bits_required:
+            raise SteganographyException("Carrier image not big enough to hold all the data")
+        
+        # Encode dimensions and channels
+        self.put_binary_value(self.binary_value(hidden_width, 16))
+        self.put_binary_value(self.binary_value(hidden_height, 16))
+        self.put_binary_value(self.binary_value(hidden_channels, 8))
+        
+        # Encode pixel data
+        for row in range(hidden_height):
+            for col in range(hidden_width):
+                for chan in range(hidden_channels):
+                    if isinstance(imtohide, np.ndarray):
+                        if hidden_channels == 1 and len(imtohide.shape) == 2:
+                            pixel_val = imtohide[row, col]
+                        else:
+                            pixel_val = imtohide[row, col, chan]
+                    else:  # ImageWrapper
+                        pixel_val = imtohide[row, col][chan]
+                    
+                    self.put_binary_value(self.byteValue(int(pixel_val)))
         return self.image
 
-    
-    def decode_image(self) :
-        width = int(self.read_bits(16), 2)
-        height = int(self.read_bits(16), 2)
-        unhideimg = np.zeros((height, width, 3), np.uint8)
-        wrapped_unhideimg = ImageWrapper(unhideimg)
-        for h in range(height):
-            for w in range(width):
-                for chan in range(3):  # Usiamo direttamente 3 per i canali RGB
-                    val = int(self.read_byte(), 2)
-                    unhideimg[h, w, chan] = val
+    def decode_image(self):
+        """
+        Decode a hidden image from the current image
+        returns: numpy.ndarray containing the decoded image
+        """
+        # Decode dimensions and channels
+        hidden_width = int(self.read_bits(16), 2)
+        hidden_height = int(self.read_bits(16), 2)
+        hidden_channels = int(self.read_bits(8), 2)
+        
+        # Check if dimensions seem reasonable
+        if hidden_width <= 0 or hidden_height <= 0 or hidden_channels <= 0 or hidden_channels > 4:
+            raise SteganographyException("Invalid hidden image dimensions")
+        
+        # Create an empty array for the hidden image
+        if hidden_channels == 1:
+            unhideimg = np.zeros((hidden_height, hidden_width), np.uint8)
+        else:
+            unhideimg = np.zeros((hidden_height, hidden_width, hidden_channels), np.uint8)
+        
+        # Decode each pixel
+        for row in range(hidden_height):
+            for col in range(hidden_width):
+                for chan in range(hidden_channels):
+                    byte_val = self.read_byte()
+                    if hidden_channels == 1:
+                        unhideimg[row, col] = int(byte_val, 2)
+                    else:
+                        unhideimg[row, col, chan] = int(byte_val, 2)
+        
         return unhideimg
     def encode_binary(self, data):
         l = len(data)
