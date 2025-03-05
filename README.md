@@ -66,5 +66,5 @@ Se vuoi contribuire a questo progetto:
 - Manda una pull request
 
 ## 📜 Licenza
-Questo progetto è distribuito sotto la licenza [scegli una licenza, ad esempio MIT, GPL, Apache].
+Questo progetto è distribuito sotto la licenza GPLv3.
 
