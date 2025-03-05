@@ -58,12 +58,6 @@ Il notebook è strutturato come segue:
 5. **📈 Visualizzazione dei risultati**: Grafici e interpretazioni.
 6. **📝 Conclusioni**: Riassunto e possibili sviluppi futuri.
 
-## 📌 Dipendenze
-Se non è presente un file `requirements.txt`, assicurati di installare manualmente le librerie necessarie. Se vuoi generare un file `requirements.txt`, esegui:
-```bash
-pip freeze > requirements.txt
-```
-
 ## 🤝 Contributi
 Se vuoi contribuire a questo progetto:
 - Fai un fork del repository
